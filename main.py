@@ -4,6 +4,8 @@
 """
 
 import os
+import csv
+import io
 import secrets as secrets_mod
 from typing import Optional
 from datetime import datetime, timedelta
@@ -14,7 +16,7 @@ import traceback
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -277,11 +279,15 @@ def list_reviews(db: Session = Depends(get_db)):
 
 # ---------------- ADMIN ----------------
 
-@app.get("/admin/stats")
-def admin_stats(admin_key: str, db: Session = Depends(get_db)):
+def _check_admin_key(admin_key: str):
     expected = os.environ.get("ADMIN_KEY")
     if not expected or not secrets_mod.compare_digest(admin_key, expected):
         raise HTTPException(status_code=403, detail="İcazə yoxdur")
+
+
+@app.get("/admin/stats")
+def admin_stats(admin_key: str, db: Session = Depends(get_db)):
+    _check_admin_key(admin_key)
 
     total = db.query(GenerationLog).count()
     done = db.query(GenerationLog).filter(GenerationLog.status == "done").count()
@@ -300,10 +306,28 @@ def admin_stats(admin_key: str, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/admin/users")
+def admin_users(admin_key: str, db: Session = Depends(get_db)):
+    _check_admin_key(admin_key)
+
+    users = db.query(User).order_by(User.created_at.desc()).all()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["email", "created_at", "token_balance"])
+    for u in users:
+        writer.writerow([u.email, u.created_at, u.token_balance])
+
+    return Response(content=buf.getvalue(), media_type="text/csv")
+
+
 # ---------------- STRIPE YONLENDIRME SEHIFELERI ----------------
 
 @app.get("/payment-success", response_class=HTMLResponse)
-def payment_success():
+def payment_success(amount: float = 0.0):
+    # amount /stripe/buy-de hesablanmis heqiqi mebleg kimi Stripe-in success_url-ine
+    # query param olaraq gelir (stripe_routes.py-e bax) - FastAPI onu avtomatik
+    # float-a cevirir, ona gore burda hec bir elave sanitizasiya lazim deyil.
+    purchase_value = f"{amount:.2f}"
     return """
     <html><head><meta charset="utf-8">
     <meta http-equiv="refresh" content="3;url=https://slaydyarat.pro">
@@ -325,7 +349,20 @@ def payment_success():
       <p>Tokenləriniz hesabınıza əlavə olundu. 3 saniyə sonra avtomatik
       yönləndiriləcəksiniz.</p>
       <a href="https://slaydyarat.pro">İndi qayıt</a>
-    </div></body></html>
+    </div>
+    <script>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '1898222571587194');
+    fbq('track', 'Purchase', {currency: 'USD', value: """ + purchase_value + """});
+    </script>
+    </body></html>
     """
 
 

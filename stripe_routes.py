@@ -58,7 +58,10 @@ def create_checkout(
             "quantity": 1,
         }],
         mode="payment",
-        success_url=f"{DOMAIN}/payment-success",
+        # amount-u ozumuz hesabladigimiz ucun (total_cents) elave Stripe sorgusu
+        # (session-i geri cekmek) lazim olmadan Purchase pixel-i ucun real deyeri
+        # birbasa query param kimi otururuk.
+        success_url=f"{DOMAIN}/payment-success?amount={total_cents / 100:.2f}",
         cancel_url=f"{DOMAIN}/payment-cancelled",
         metadata={"user_email": user.email, "tokens": quantity},
     )
