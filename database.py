@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
 """Verilenler bazasi: istifadeci ve token balansi."""
 
+import os
 import secrets
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = "sqlite:///./app.db"  # kicik miqyas ucun kifayetdir; boyudukce Postgres-e kecmek olar
+# Render (ve ya baska hostinq) DATABASE_URL mühit dəyişəni ilə Postgres verir -
+# varsa onu istifadə edirik, yoxdursa (lokal test üçün) sqlite-a geri düşürük.
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./app.db")
+if DATABASE_URL.startswith("postgres://"):
+    # SQLAlchemy 1.4+ "postgres://" schema-sini artiq qebul etmir, "postgresql://" isteyir.
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# check_same_thread YALNIZ SQLite-a aiddir - psycopg2 (Postgres) bunu tanimir.
+_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
@@ -65,6 +73,9 @@ _NEW_COLUMNS = {
 
 
 def _migrate_missing_columns():
+    """NEZERE AL: "PRAGMA table_info" YALNIZ SQLite-a aiddir. Postgres-de (Render)
+    verilenler bazasi onsuz da hemise BOS/TEZE olacaq (create_all() butun sutunlari
+    ozu yaradir), ona gore bu funksiya YALNIZ SQLite altinda cagirilir (asagida)."""
     with engine.connect() as conn:
         for table, columns in _NEW_COLUMNS.items():
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
@@ -76,7 +87,8 @@ def _migrate_missing_columns():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-    _migrate_missing_columns()
+    if engine.dialect.name == "sqlite":
+        _migrate_missing_columns()
 
 
 def get_db():
