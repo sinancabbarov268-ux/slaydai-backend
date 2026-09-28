@@ -10,8 +10,11 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # varsa onu istifadə edirik, yoxdursa (lokal test üçün) sqlite-a geri düşürük.
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./app.db")
 if DATABASE_URL.startswith("postgres://"):
-    # SQLAlchemy 1.4+ "postgres://" schema-sini artiq qebul etmir, "postgresql://" isteyir.
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    # SQLAlchemy 1.4+ "postgres://" schema-sini artiq qebul etmir + mütləq psycopg2
+    # dialektini (psycopg v3 yox) istifadə etmək üçün "+psycopg2" elave edirik.
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("postgresql+"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 # check_same_thread YALNIZ SQLite-a aiddir - psycopg2 (Postgres) bunu tanimir.
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
