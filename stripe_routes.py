@@ -58,8 +58,8 @@ def create_checkout(
             "quantity": 1,
         }],
         mode="payment",
-        success_url=f"{DOMAIN}/odenis-uğurlu",
-        cancel_url=f"{DOMAIN}/odenis-legv",
+        success_url=f"{DOMAIN}/payment-success",
+        cancel_url=f"{DOMAIN}/payment-cancelled",
         metadata={"user_email": user.email, "tokens": quantity},
     )
     return {"checkout_url": session.url}
