@@ -14,6 +14,7 @@ import traceback
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -297,3 +298,57 @@ def admin_stats(admin_key: str, db: Session = Depends(get_db)):
         "feedback_up": feedback_up,
         "feedback_down": feedback_down,
     }
+
+
+# ---------------- STRIPE YONLENDIRME SEHIFELERI ----------------
+
+@app.get("/payment-success", response_class=HTMLResponse)
+def payment_success():
+    return """
+    <html><head><meta charset="utf-8">
+    <meta http-equiv="refresh" content="3;url=https://slaydyarat.pro">
+    <style>
+      body{font-family:-apple-system,sans-serif;background:#081729;color:#f3f0ea;
+        display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}
+      .box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+        border-radius:18px;padding:48px 36px;max-width:420px}
+      .check{font-size:48px;margin-bottom:12px}
+      h2{margin:0 0 12px}
+      p{color:rgba(243,240,234,.7);line-height:1.6}
+      a{display:inline-block;margin-top:20px;padding:12px 28px;border-radius:12px;
+        background:linear-gradient(135deg,#e9c98a,#d9ab5c);color:#20140a;
+        font-weight:700;text-decoration:none}
+    </style></head>
+    <body><div class="box">
+      <div class="check">✓</div>
+      <h2>Ödəniş uğurla tamamlandı!</h2>
+      <p>Tokenləriniz hesabınıza əlavə olundu. 3 saniyə sonra avtomatik
+      yönləndiriləcəksiniz.</p>
+      <a href="https://slaydyarat.pro">İndi qayıt</a>
+    </div></body></html>
+    """
+
+
+@app.get("/payment-cancelled", response_class=HTMLResponse)
+def payment_cancelled():
+    return """
+    <html><head><meta charset="utf-8">
+    <meta http-equiv="refresh" content="3;url=https://slaydyarat.pro">
+    <style>
+      body{font-family:-apple-system,sans-serif;background:#081729;color:#f3f0ea;
+        display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}
+      .box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+        border-radius:18px;padding:48px 36px;max-width:420px}
+      h2{margin:0 0 12px}
+      p{color:rgba(243,240,234,.7);line-height:1.6}
+      a{display:inline-block;margin-top:20px;padding:12px 28px;border-radius:12px;
+        background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);
+        color:#f3f0ea;font-weight:600;text-decoration:none}
+    </style></head>
+    <body><div class="box">
+      <h2>Ödəniş ləğv edildi</h2>
+      <p>İstədiyiniz zaman yenidən cəhd edə bilərsiniz. 3 saniyə sonra
+      avtomatik yönləndiriləcəksiniz.</p>
+      <a href="https://slaydyarat.pro">Sayta qayıt</a>
+    </div></body></html>
+    """
