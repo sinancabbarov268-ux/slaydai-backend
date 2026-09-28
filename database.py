@@ -34,6 +34,7 @@ class GenerationLog(Base):
     downloaded = Column(Boolean, default=False)
     download_clicked_at = Column(DateTime, nullable=True)
     feedback = Column(String, nullable=True)  # "up" / "down" / None
+    result_url = Column(String, nullable=True)  # Gamma-nin exportUrl-i (pptx linki)
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -58,6 +59,7 @@ _NEW_COLUMNS = {
         ("downloaded", "BOOLEAN DEFAULT 0"),
         ("download_clicked_at", "DATETIME"),
         ("feedback", "VARCHAR"),
+        ("result_url", "VARCHAR"),
     ],
 }
 

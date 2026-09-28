@@ -139,9 +139,10 @@ def _run_generation_job(log_id: int, project: dict):
     log = db.query(GenerationLog).filter(GenerationLog.id == log_id).first()
     try:
         output_path = os.path.join(OUTPUT_DIR, f"{uuid.uuid4().hex}_slides.json")
-        run_full_pipeline(project, output_path)
+        result = run_full_pipeline(project, output_path)
         log.status = "done"
         log.file_path = output_path
+        log.result_url = result.get("result_url")
     except Exception as e:
         log.status = "error"
         log.error_message = f"{e}\n{traceback.format_exc()[:500]}"
@@ -187,7 +188,8 @@ def check_generation(generation_id: int, user: User = Depends(get_current_user),
     result = {"status": log.status, "movzu": log.movzu}
     if log.status == "done":
         filename = os.path.basename(log.file_path)
-        result["download_url"] = f"/files/{filename}"
+        result["download_url"] = f"/files/{filename}"  # xam slides_markdown.json (arxiv/debug ucun)
+        result["result_url"] = log.result_url  # Gamma-nin hazir .pptx linki (esas yukleme menbeyi)
     elif log.status == "error":
         result["error"] = log.error_message
     return result

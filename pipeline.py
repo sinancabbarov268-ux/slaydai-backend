@@ -535,8 +535,9 @@ def send_to_gamma(slides_markdown: list, project: dict, poll_interval: int = 5, 
 
 
 def run_full_pipeline(project: dict, output_path: str) -> dict:
-    """Tedqiqat + Presenton ucun slaydlarin Markdown mezmunu (generasiya Presenton-da olur).
-    output_path: .json fayl (10 elementli Markdown massivi bura da yazilir)."""
+    """Tedqiqat + dizayn + Gamma generasiyasi (TAM pipeline - real Gamma
+    kreditini xercleyir). output_path: .json fayl (N elementli Markdown
+    massivi bura da yazilir)."""
     client = get_client()
     research = research_topic(client, project)
     research_path = re.sub(r"\.json$", "", output_path) + "_research.json"
@@ -545,4 +546,14 @@ def run_full_pipeline(project: dict, output_path: str) -> dict:
     slides = design_slides(client, project, research)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(slides, f, ensure_ascii=False, indent=2)
-    return {"research": research, "slides": slides}
+
+    gamma_result = send_to_gamma(slides, project)
+    if gamma_result.get("status") != "completed":
+        raise RuntimeError(f"Gamma generasiyasi ugursuz oldu: {gamma_result.get('error') or gamma_result}")
+
+    return {
+        "research": research,
+        "slides": slides,
+        "gamma": gamma_result,
+        "result_url": gamma_result.get("exportUrl") or gamma_result.get("gammaUrl"),
+    }
