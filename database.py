@@ -92,9 +92,8 @@ _NEW_COLUMNS = {
 
 
 def _migrate_missing_columns():
-    """NEZERE AL: "PRAGMA table_info" YALNIZ SQLite-a aiddir. Postgres-de (Render)
-    verilenler bazasi onsuz da hemise BOS/TEZE olacaq (create_all() butun sutunlari
-    ozu yaradir), ona gore bu funksiya YALNIZ SQLite altinda cagirilir (asagida)."""
+    """"PRAGMA table_info" YALNIZ SQLite-a aiddir - bu funksiya YALNIZ SQLite
+    altinda cagirilir (asagida)."""
     with engine.connect() as conn:
         for table, columns in _NEW_COLUMNS.items():
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
@@ -104,10 +103,33 @@ def _migrate_missing_columns():
         conn.commit()
 
 
+def _migrate_missing_columns_postgres():
+    """Postgres-de (Render ve s.) verilenler bazasi ILK QURULUŞDAN SONRA da
+    canli qala biler ve schema sonradan (bu fayldaki modellere yeni sutun
+    elave olunanda) deyise biler - ona gore create_all() tek basina kifayet
+    etmir, SQLite-daki kimi Postgres ucun de ALTER TABLE-le catismayan
+    sutunlari elave etmek lazimdir. information_schema.columns SQLite-in
+    PRAGMA table_info-suna Postgres-deki qarsiligidir."""
+    with engine.connect() as conn:
+        for table, columns in _NEW_COLUMNS.items():
+            existing = {row[0] for row in conn.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = :t"
+            ), {"t": table})}
+            for col_name, col_def in columns:
+                if col_name not in existing:
+                    # Postgres tip sintaksisi SQLite-dan ferqlidir (VARCHAR eynidir,
+                    # BOOLEAN DEFAULT 0 -> BOOLEAN DEFAULT FALSE olmalidir)
+                    pg_def = col_def.replace("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {pg_def}"))
+        conn.commit()
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "sqlite":
         _migrate_missing_columns()
+    elif engine.dialect.name == "postgresql":
+        _migrate_missing_columns_postgres()
 
 
 def get_db():
