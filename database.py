@@ -39,6 +39,7 @@ class GenerationLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, index=True, nullable=False)
     movzu = Column(String)
+    universitet_adi = Column(String, nullable=True)  # "en cox universitetler" statistikasi ucun
     status = Column(String, default="pending")  # pending / done / error
     file_path = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
@@ -60,6 +61,20 @@ class Review(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class PageView(Base):
+    __tablename__ = "page_views"
+    id = Column(Integer, primary_key=True, index=True)
+    utm_source = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class TokenPurchase(Base):
+    __tablename__ = "token_purchases"
+    id = Column(Integer, primary_key=True, index=True)
+    quantity = Column(Integer, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 # Yeni sutunlarin (yuxaridaki modellere elave olunanlarin) siyahisi - SQLite-da
 # Base.metadata.create_all() movcud cedvellere YENI SUTUN elave ETMIR (yalniz
 # movcud olmayan cedvelleri yaradir), ona gore movcud app.db-de bu sutunlari
@@ -71,6 +86,7 @@ _NEW_COLUMNS = {
         ("download_clicked_at", "DATETIME"),
         ("feedback", "VARCHAR"),
         ("result_url", "VARCHAR"),
+        ("universitet_adi", "VARCHAR"),
     ],
 }
 

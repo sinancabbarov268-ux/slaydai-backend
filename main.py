@@ -6,7 +6,9 @@
 import os
 import csv
 import io
+import urllib.parse
 import secrets as secrets_mod
+from html import escape as _esc
 from typing import Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -18,9 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database import init_db, get_db, User, GenerationLog, Review
+from database import init_db, get_db, User, GenerationLog, Review, PageView, TokenPurchase
 from auth import hash_password, verify_password, get_current_user
 from pipeline import run_full_pipeline
 import stripe_routes
@@ -66,6 +69,10 @@ class ReviewRequest(BaseModel):
 
 class FeedbackRequest(BaseModel):
     feedback: str  # "up" / "down"
+
+
+class PageViewRequest(BaseModel):
+    utm_source: Optional[str] = None
 
 
 class ProjectRequest(BaseModel):
@@ -170,7 +177,9 @@ def generate_slides(
     user.token_balance -= 1
     db.commit()
 
-    log = GenerationLog(user_id=user.id, movzu=project.movzu, status="pending")
+    log = GenerationLog(
+        user_id=user.id, movzu=project.movzu, universitet_adi=project.universitet_adi, status="pending",
+    )
     db.add(log)
     db.commit()
     db.refresh(log)
@@ -277,6 +286,16 @@ def list_reviews(db: Session = Depends(get_db)):
     ]
 
 
+# ---------------- TRACKING ----------------
+
+@app.post("/track/pageview")
+def track_pageview(req: PageViewRequest, db: Session = Depends(get_db)):
+    """Hec bir IP, hec bir sexsi melumat saxlanmir - yalniz utm_source (varsa)."""
+    db.add(PageView(utm_source=req.utm_source or None))
+    db.commit()
+    return {"status": "ok"}
+
+
 # ---------------- ADMIN ----------------
 
 def _check_admin_key(admin_key: str):
@@ -318,6 +337,379 @@ def admin_users(admin_key: str, db: Session = Depends(get_db)):
         writer.writerow([u.email, u.created_at, u.token_balance])
 
     return Response(content=buf.getvalue(), media_type="text/csv")
+
+
+@app.post("/admin/reviews/{review_id}/approve")
+def admin_approve_review(review_id: int, admin_key: str, db: Session = Depends(get_db)):
+    _check_admin_key(admin_key)
+
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Rəy tapılmadı")
+    review.approved = True
+    db.commit()
+    return {"status": "ok"}
+
+
+_ADMIN_DASHBOARD_TEMPLATE = """<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin Dashboard — SlaydAI</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#05070d; --panel:#0e1320; --panel-2:#121829; --border:rgba(255,255,255,.08);
+    --border-soft:rgba(255,255,255,.05); --ink:#eef0f5; --sub:#8891a7; --sub-2:#5c6478;
+    --gold:#d9ab5c; --gold-soft:#e9c98a; --green:#3ecf8e; --red:#f2685c; --amber:#f0b458;
+    --blue:#5b8def; --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Inter',-apple-system,Arial,sans-serif; background:var(--bg);
+    color:var(--ink); font-variant-numeric:tabular-nums;
+    background-image:radial-gradient(700px 400px at 100% -10%, rgba(217,171,92,.08), transparent 60%),
+                      radial-gradient(600px 400px at 0% 0%, rgba(91,141,239,.06), transparent 60%);
+    background-attachment:fixed;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:36px 24px 80px;}
+  header.top{display:flex; align-items:center; justify-content:space-between; margin-bottom:32px; flex-wrap:wrap; gap:14px;}
+  .brand{font-size:15px; font-weight:700; letter-spacing:.2px; display:flex; align-items:center; gap:9px; color:var(--ink);}
+  .brand .dot{width:8px; height:8px; border-radius:50%; background:var(--gold); box-shadow:0 0 10px var(--gold);}
+  .brand .sep{color:var(--sub-2); font-weight:400;}
+  .brand .tag{color:var(--sub); font-weight:500;}
+  .btn-outline{
+    font-size:12.5px; font-weight:600; color:var(--ink); background:var(--panel-2);
+    border:1px solid var(--border); border-radius:9px; padding:9px 15px; text-decoration:none;
+    display:inline-flex; align-items:center; gap:6px; transition:border-color .2s, background .2s;
+  }
+  .btn-outline:hover{border-color:rgba(217,171,92,.4); background:#161d31;}
+
+  section{margin-bottom:38px;}
+  .section-title{font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--sub); margin:0 0 16px; display:flex; align-items:center; gap:8px;}
+  .section-title .n{color:var(--sub-2); font-weight:500;}
+
+  .panel{
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+    border:1px solid var(--border); border-radius:var(--radius); padding:26px;
+  }
+
+  /* stat cards */
+  .stats-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:14px;}
+  .stat-card{
+    background:linear-gradient(180deg, var(--panel), var(--panel-2)); border:1px solid var(--border);
+    border-radius:var(--radius); padding:20px 20px 18px; transition:transform .2s, border-color .2s;
+  }
+  .stat-card:hover{transform:translateY(-3px); border-color:rgba(217,171,92,.35);}
+  .stat-card.accent{border-color:rgba(217,171,92,.4); background:linear-gradient(180deg, rgba(217,171,92,.1), var(--panel-2));}
+  .stat-label{font-size:12px; color:var(--sub); font-weight:600; margin-bottom:10px;}
+  .stat-value{font-size:30px; font-weight:800; letter-spacing:-.5px; color:var(--ink);}
+  .stat-card.accent .stat-value{color:var(--gold-soft);}
+
+  /* funnel */
+  .funnel-wrap{max-width:560px; margin:0 auto;}
+  .funnel-step{width:100%;}
+  .funnel-bar{
+    width:var(--w); min-width:150px; margin:0 auto; text-align:center;
+    background:linear-gradient(135deg, var(--gold-soft), var(--gold)); color:#20140a;
+    border-radius:10px; padding:16px 12px; transform-origin:center;
+    animation:growIn .5s cubic-bezier(.2,.8,.2,1) both; animation-delay:calc(var(--i) * .09s);
+  }
+  @keyframes growIn{from{transform:scaleX(.3); opacity:0;} to{transform:scaleX(1); opacity:1;}}
+  .funnel-count{font-size:21px; font-weight:800;}
+  .funnel-label{text-align:center; font-size:12.5px; color:var(--sub); margin:9px 0 4px; font-weight:600;}
+  .funnel-conv{text-align:center; font-size:12px; color:var(--sub-2); margin:2px 0 10px;}
+  .funnel-conv b{color:var(--green);}
+
+  /* tables */
+  .table-scroll{overflow-x:auto;}
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  thead th{
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--sub-2);
+    font-weight:700; padding:0 14px 10px; border-bottom:1px solid var(--border);
+  }
+  tbody td{padding:12px 14px; border-bottom:1px solid var(--border-soft); color:var(--ink);}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.015);}
+  tbody tr:hover{background:rgba(217,171,92,.05);}
+  td.empty{color:var(--sub-2); text-align:center; padding:24px; font-style:italic;}
+  td.stars{color:var(--gold-soft); letter-spacing:1px;}
+
+  .mini-bar{width:80px; height:6px; border-radius:4px; background:rgba(255,255,255,.06); overflow:hidden;}
+  .mini-bar-fill{height:100%; background:var(--blue); border-radius:4px;}
+  .mini-bar-fill.gold{background:var(--gold);}
+
+  .badge{font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px; display:inline-block;}
+  .badge.ok{background:rgba(62,207,142,.15); color:var(--green);}
+  .badge.pending{background:rgba(240,180,88,.15); color:var(--amber);}
+  .btn-approve{
+    font-size:11.5px; font-weight:700; color:#0e1320; background:var(--green); border:none;
+    border-radius:7px; padding:6px 12px; cursor:pointer; margin-left:8px; transition:opacity .2s;
+  }
+  .btn-approve:hover{opacity:.85;}
+  .btn-approve:disabled{opacity:.5; cursor:default;}
+
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+
+  @media (max-width:980px){
+    .stats-grid{grid-template-columns:repeat(2,1fr);}
+    .grid-2{grid-template-columns:1fr;}
+  }
+  @media (max-width:600px){
+    .stats-grid{grid-template-columns:1fr;}
+    .wrap{padding:24px 14px 60px;}
+    .funnel-bar{min-width:0;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand"><span class="dot"></span> SlaydAI <span class="sep">/</span> <span class="tag">Admin Dashboard</span></div>
+    <a class="btn-outline" href="/admin/users?admin_key=__ADMIN_KEY_URL__" target="_blank" rel="noopener">⬇ İstifadəçiləri CSV kimi yüklə</a>
+  </header>
+
+  <section>
+    <div class="stats-grid">
+      __STAT_CARDS__
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Huni (Funnel)</div>
+    <div class="panel funnel-wrap">
+      __FUNNEL__
+    </div>
+  </section>
+
+  <section class="grid-2">
+    <div>
+      <div class="section-title">Mənbə (UTM)</div>
+      <div class="panel table-scroll">
+        <table>
+          <thead><tr><th>Mənbə</th><th>Sayı</th><th></th></tr></thead>
+          <tbody>__UTM_ROWS__</tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="section-title">Ən çox alınan token miqdarı</div>
+      <div class="panel table-scroll">
+        <table>
+          <thead><tr><th>Miqdar</th><th>Sifariş sayı</th><th></th></tr></thead>
+          <tbody>__QTY_ROWS__</tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Ən çox universitetlər <span class="n">TOP 10</span></div>
+    <div class="panel table-scroll">
+      <table>
+        <thead><tr><th>#</th><th>Universitet</th><th>Generasiya sayı</th></tr></thead>
+        <tbody>__UNI_ROWS__</tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">İstifadəçilər <span class="n">son 50</span></div>
+    <div class="panel table-scroll">
+      <table>
+        <thead><tr><th>Email</th><th>Qeydiyyat tarixi</th><th>Token balansı</th><th>Generasiya sayı</th></tr></thead>
+        <tbody>__USERS_ROWS__</tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Rəylər</div>
+    <div class="panel table-scroll">
+      <table>
+        <thead><tr><th>İstifadəçi</th><th>Reytinq</th><th>Şərh</th><th>Tarix</th><th>Status</th></tr></thead>
+        <tbody>__REVIEWS_ROWS__</tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<script>
+const ADMIN_KEY = '__ADMIN_KEY_JS__';
+async function approveReview(id, btn) {
+  btn.disabled = true;
+  btn.innerText = "...";
+  try {
+    const res = await fetch(`/admin/reviews/${id}/approve?admin_key=${encodeURIComponent(ADMIN_KEY)}`, { method: "POST" });
+    if (!res.ok) throw new Error("request failed");
+    const row = document.getElementById(`review-row-${id}`);
+    if (row) row.children[4].innerHTML = '<span class="badge ok">Təsdiqlənib</span>';
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerText = "Təsdiqlə";
+    alert("Xəta baş verdi, yenidən cəhd et.");
+  }
+}
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+def admin_dashboard(admin_key: str, db: Session = Depends(get_db)):
+    _check_admin_key(admin_key)
+
+    # ---------- 1) HUNI (FUNNEL) ----------
+    total_page_views = db.query(PageView).count()
+    total_users = db.query(User).count()
+    users_with_generation = db.query(func.count(func.distinct(GenerationLog.user_id))).scalar() or 0
+    total_payments = db.query(TokenPurchase).count()
+
+    funnel_stages = [
+        ("Səhifə baxışı", total_page_views),
+        ("Qeydiyyat", total_users),
+        ("Generasiya sifarişi", users_with_generation),
+        ("Uğurlu ödəniş", total_payments),
+    ]
+    max_stage = max((c for _, c in funnel_stages), default=0) or 1
+    funnel_parts = []
+    for i, (label, count) in enumerate(funnel_stages):
+        width_pct = max(10, round(count / max_stage * 100)) if count > 0 else 3
+        if i == 0:
+            funnel_parts.append(f'<div class="funnel-step" style="--w:{width_pct}%; --i:{i}">'
+                                 f'<div class="funnel-bar"><span class="funnel-count">{count:,}</span></div>'
+                                 f'<div class="funnel-label">{_esc(label)}</div></div>')
+        else:
+            prev_count = funnel_stages[i - 1][1]
+            conv_pct = round(count / prev_count * 100, 1) if prev_count else 0.0
+            funnel_parts.append(
+                f'<div class="funnel-conv">↓ <b>{conv_pct}%</b> keçid</div>'
+                f'<div class="funnel-step" style="--w:{width_pct}%; --i:{i}">'
+                f'<div class="funnel-bar"><span class="funnel-count">{count:,}</span></div>'
+                f'<div class="funnel-label">{_esc(label)}</div></div>'
+            )
+    funnel_html = "".join(funnel_parts)
+
+    # ---------- 2) UTM MENBE ----------
+    utm_raw = db.query(PageView.utm_source, func.count(PageView.id)).group_by(PageView.utm_source).all()
+    utm_counts = {}
+    for src, cnt in utm_raw:
+        key = src if src else "direct"
+        utm_counts[key] = utm_counts.get(key, 0) + cnt
+    utm_sorted = sorted(utm_counts.items(), key=lambda x: -x[1])
+    utm_total = sum(c for _, c in utm_sorted) or 1
+    utm_html = "".join(
+        f'<tr><td>{_esc(src)}</td><td>{cnt:,}</td>'
+        f'<td><div class="mini-bar"><div class="mini-bar-fill" style="width:{round(cnt/utm_total*100)}%"></div></div></td></tr>'
+        for src, cnt in utm_sorted
+    ) or '<tr><td colspan="3" class="empty">Hələ məlumat yoxdur</td></tr>'
+
+    # ---------- 3) EN COX UNIVERSITETLER ----------
+    uni_rows = (
+        db.query(GenerationLog.universitet_adi, func.count(GenerationLog.id).label("c"))
+        .filter(GenerationLog.universitet_adi.isnot(None), GenerationLog.universitet_adi != "")
+        .group_by(GenerationLog.universitet_adi)
+        .order_by(func.count(GenerationLog.id).desc())
+        .limit(10)
+        .all()
+    )
+    uni_html = "".join(
+        f"<tr><td>{i+1}</td><td>{_esc(name)}</td><td>{cnt:,}</td></tr>"
+        for i, (name, cnt) in enumerate(uni_rows)
+    ) or '<tr><td colspan="3" class="empty">Hələ məlumat yoxdur (köhnə qeydlərdə universitet adı saxlanılmayıb)</td></tr>'
+
+    # ---------- 4) ISTIFADECILER (max 50) ----------
+    users = db.query(User).order_by(User.created_at.desc()).limit(50).all()
+    gen_counts = dict(
+        db.query(GenerationLog.user_id, func.count(GenerationLog.id)).group_by(GenerationLog.user_id).all()
+    )
+    users_html = "".join(
+        f'<tr><td>{_esc(u.email)}</td>'
+        f'<td>{u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "-"}</td>'
+        f'<td>{u.token_balance}</td>'
+        f'<td>{gen_counts.get(u.id, 0)}</td></tr>'
+        for u in users
+    ) or '<tr><td colspan="4" class="empty">İstifadəçi yoxdur</td></tr>'
+
+    # ---------- 5) EN COX ALINAN TOKEN MIQDARI ----------
+    qty_rows = (
+        db.query(TokenPurchase.quantity, func.count(TokenPurchase.id).label("c"))
+        .group_by(TokenPurchase.quantity)
+        .order_by(func.count(TokenPurchase.id).desc())
+        .all()
+    )
+    qty_total = sum(c for _, c in qty_rows) or 1
+    qty_html = "".join(
+        f'<tr><td>{q} token</td><td>{cnt:,}</td>'
+        f'<td><div class="mini-bar"><div class="mini-bar-fill gold" style="width:{round(cnt/qty_total*100)}%"></div></div></td></tr>'
+        for q, cnt in qty_rows
+    ) or '<tr><td colspan="3" class="empty">Hələ ödəniş yoxdur</td></tr>'
+
+    # ---------- 6) REYLER (hamisi) ----------
+    review_rows = (
+        db.query(Review, User.email)
+        .join(User, Review.user_id == User.id)
+        .order_by(Review.created_at.desc())
+        .all()
+    )
+    reviews_parts = []
+    for r, email in review_rows:
+        stars = "★" * r.rating + "☆" * (5 - r.rating)
+        if r.approved:
+            status_html = '<span class="badge ok">Təsdiqlənib</span>'
+        else:
+            status_html = (
+                '<span class="badge pending">Gözləyir</span> '
+                f'<button class="btn-approve" onclick="approveReview({r.id}, this)">Təsdiqlə</button>'
+            )
+        reviews_parts.append(
+            f'<tr id="review-row-{r.id}"><td>{_esc(email)}</td><td class="stars">{stars}</td>'
+            f'<td>{_esc(r.comment or "—")}</td>'
+            f'<td>{r.created_at.strftime("%Y-%m-%d") if r.created_at else "-"}</td>'
+            f'<td>{status_html}</td></tr>'
+        )
+    reviews_html = "".join(reviews_parts) or '<tr><td colspan="5" class="empty">Rəy yoxdur</td></tr>'
+
+    # ---------- 7) UMUMI STATISTIKA KARTLARI ----------
+    total_generations = db.query(GenerationLog).count()
+    done_generations = db.query(GenerationLog).filter(GenerationLog.status == "done").count()
+    success_rate = round(done_generations / total_generations * 100, 1) if total_generations else 0.0
+
+    total_revenue_cents = 0
+    for (qty,) in db.query(TokenPurchase.quantity).all():
+        try:
+            total_revenue_cents += stripe_routes.calculate_price(qty)
+        except ValueError:
+            pass
+    total_revenue = total_revenue_cents / 100
+
+    stat_cards_html = f"""
+      <div class="stat-card"><div class="stat-label">İstifadəçilər</div><div class="stat-value">{total_users:,}</div></div>
+      <div class="stat-card"><div class="stat-label">Generasiyalar</div><div class="stat-value">{total_generations:,}</div></div>
+      <div class="stat-card"><div class="stat-label">Uğur faizi</div><div class="stat-value">{success_rate}%</div></div>
+      <div class="stat-card"><div class="stat-label">Ödənişlər</div><div class="stat-value">{total_payments:,}</div></div>
+      <div class="stat-card accent"><div class="stat-label">Cəmi gəlir</div><div class="stat-value">${total_revenue:,.2f}</div></div>
+    """
+
+    admin_key_url = urllib.parse.quote(admin_key, safe="")
+    admin_key_js = admin_key.replace("\\", "\\\\").replace("'", "\\'")
+
+    page = _ADMIN_DASHBOARD_TEMPLATE
+    page = page.replace("__STAT_CARDS__", stat_cards_html)
+    page = page.replace("__FUNNEL__", funnel_html)
+    page = page.replace("__UTM_ROWS__", utm_html)
+    page = page.replace("__UNI_ROWS__", uni_html)
+    page = page.replace("__USERS_ROWS__", users_html)
+    page = page.replace("__QTY_ROWS__", qty_html)
+    page = page.replace("__REVIEWS_ROWS__", reviews_html)
+    page = page.replace("__ADMIN_KEY_URL__", admin_key_url)
+    page = page.replace("__ADMIN_KEY_JS__", admin_key_js)
+    return page
 
 
 # ---------------- STRIPE YONLENDIRME SEHIFELERI ----------------

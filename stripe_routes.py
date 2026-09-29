@@ -6,7 +6,7 @@ import stripe
 from fastapi import APIRouter, Request, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 
-from database import get_db, User
+from database import get_db, User, TokenPurchase
 from auth import get_current_user
 
 router = APIRouter()
@@ -83,9 +83,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         email = session["metadata"]["user_email"]
         tokens = int(session["metadata"]["tokens"])
 
+        db.add(TokenPurchase(quantity=tokens))  # admin panel ucun sadəcə sayğac, user-ə bağlı deyil
+
         user = db.query(User).filter(User.email == email).first()
         if user:
             user.token_balance += tokens
-            db.commit()
+        db.commit()
 
     return {"status": "ok"}
