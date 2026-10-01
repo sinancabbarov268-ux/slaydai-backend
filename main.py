@@ -527,6 +527,16 @@ _ADMIN_DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   </section>
 
   <section>
+    <div class="section-title">Son generasiyalar <span class="n">son 20</span></div>
+    <div class="panel table-scroll">
+      <table>
+        <thead><tr><th>Email</th><th>Mövzu</th><th>Tarix</th><th></th></tr></thead>
+        <tbody>__RECENT_GEN_ROWS__</tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
     <div class="section-title">Rəylər</div>
     <div class="panel table-scroll">
       <table>
@@ -636,6 +646,28 @@ def admin_dashboard(admin_key: str, db: Session = Depends(get_db)):
         for u in users
     ) or '<tr><td colspan="4" class="empty">İstifadəçi yoxdur</td></tr>'
 
+    # ---------- 4b) SON GENERASIYALAR (son 20, status=done) ----------
+    recent_gens = (
+        db.query(GenerationLog, User.email)
+        .join(User, GenerationLog.user_id == User.id)
+        .filter(GenerationLog.status == "done")
+        .order_by(GenerationLog.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    recent_gen_parts = []
+    for log, email in recent_gens:
+        if log.result_url:
+            link_html = f'<a class="btn-outline" href="{_esc(log.result_url)}" target="_blank" rel="noopener">Gamma-da aç</a>'
+        else:
+            link_html = ""
+        recent_gen_parts.append(
+            f'<tr><td>{_esc(email)}</td><td>{_esc(log.movzu or "-")}</td>'
+            f'<td>{log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else "-"}</td>'
+            f'<td>{link_html}</td></tr>'
+        )
+    recent_gen_html = "".join(recent_gen_parts) or '<tr><td colspan="4" class="empty">Hələ tamamlanmış generasiya yoxdur</td></tr>'
+
     # ---------- 5) EN COX ALINAN TOKEN MIQDARI ----------
     qty_rows = (
         db.query(TokenPurchase.quantity, func.count(TokenPurchase.id).label("c"))
@@ -705,6 +737,7 @@ def admin_dashboard(admin_key: str, db: Session = Depends(get_db)):
     page = page.replace("__UTM_ROWS__", utm_html)
     page = page.replace("__UNI_ROWS__", uni_html)
     page = page.replace("__USERS_ROWS__", users_html)
+    page = page.replace("__RECENT_GEN_ROWS__", recent_gen_html)
     page = page.replace("__QTY_ROWS__", qty_html)
     page = page.replace("__REVIEWS_ROWS__", reviews_html)
     page = page.replace("__ADMIN_KEY_URL__", admin_key_url)
