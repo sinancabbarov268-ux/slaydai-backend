@@ -137,7 +137,11 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
 @app.get("/me")
 def me(user: User = Depends(get_current_user)):
-    return {"email": user.email, "token_balance": user.token_balance}
+    return {
+        "email": user.email,
+        "token_balance": user.token_balance,
+        "is_first_free_used": user.is_first_free_used,
+    }
 
 
 # ---------------- SLAYD GENERASİYASI ----------------
@@ -175,6 +179,14 @@ def generate_slides(
 
     # token-i evvelceden azaldiriq ki, ayni anda ikici sorgu ile "pulsuz" generasiya olunmasin
     user.token_balance -= 1
+
+    project_data = project.model_dump()
+    if not user.is_first_free_used:
+        # ilk generasiya - sukunetle (xeta vermeden) maksimum 5 slaydla mehdudlasdiririq
+        if project_data["slayd_sayi_hedefi"] > 5:
+            project_data["slayd_sayi_hedefi"] = 5
+        user.is_first_free_used = True
+
     db.commit()
 
     log = GenerationLog(
@@ -184,7 +196,7 @@ def generate_slides(
     db.commit()
     db.refresh(log)
 
-    background_tasks.add_task(_run_generation_job, log.id, project.model_dump())
+    background_tasks.add_task(_run_generation_job, log.id, project_data)
 
     return {"generation_id": log.id, "status": "pending", "message": "Generasiya basladi, biraz sonra yoxla."}
 

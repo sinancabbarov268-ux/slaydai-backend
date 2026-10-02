@@ -31,6 +31,7 @@ class User(Base):
     api_token = Column(String, unique=True, index=True, default=lambda: secrets.token_hex(24))
     token_balance = Column(Integer, default=0)  # neçe slayd generasiyasi haqqi qalib
     signup_ip = Column(String, nullable=True)  # ilk pulsuz generasiya qorumasi ucun
+    is_first_free_used = Column(Boolean, default=False)  # ilk generasiyada 5 slayd limiti ucun
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -80,7 +81,7 @@ class TokenPurchase(Base):
 # movcud olmayan cedvelleri yaradir), ona gore movcud app.db-de bu sutunlari
 # ALTER TABLE ile elave etmek lazimdir ki, kohne melumat itmesin.
 _NEW_COLUMNS = {
-    "users": [("signup_ip", "VARCHAR")],
+    "users": [("signup_ip", "VARCHAR"), ("is_first_free_used", "BOOLEAN DEFAULT 0")],
     "generation_logs": [
         ("downloaded", "BOOLEAN DEFAULT 0"),
         ("download_clicked_at", "DATETIME"),
