@@ -51,7 +51,7 @@ def create_checkout(
         payment_method_types=["card"],
         line_items=[{
             "price_data": {
-                "currency": "usd",
+                "currency": "azn",
                 "product_data": {"name": f"{quantity} sorğu paketi"},
                 "unit_amount": total_cents,
             },

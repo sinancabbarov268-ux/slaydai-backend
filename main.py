@@ -737,7 +737,7 @@ def admin_dashboard(admin_key: str, db: Session = Depends(get_db)):
       <div class="stat-card"><div class="stat-label">Generasiyalar</div><div class="stat-value">{total_generations:,}</div></div>
       <div class="stat-card"><div class="stat-label">Uğur faizi</div><div class="stat-value">{success_rate}%</div></div>
       <div class="stat-card"><div class="stat-label">Ödənişlər</div><div class="stat-value">{total_payments:,}</div></div>
-      <div class="stat-card accent"><div class="stat-label">Cəmi gəlir</div><div class="stat-value">${total_revenue:,.2f}</div></div>
+      <div class="stat-card accent"><div class="stat-label">Cəmi gəlir</div><div class="stat-value">{total_revenue:,.2f} ₼</div></div>
     """
 
     admin_key_url = urllib.parse.quote(admin_key, safe="")
@@ -797,7 +797,7 @@ def payment_success(amount: float = 0.0):
     s.parentNode.insertBefore(t,s)}(window, document,'script',
     'https://connect.facebook.net/en_US/fbevents.js');
     fbq('init', '1898222571587194');
-    fbq('track', 'Purchase', {currency: 'USD', value: """ + purchase_value + """});
+    fbq('track', 'Purchase', {currency: 'AZN', value: """ + purchase_value + """});
     </script>
     </body></html>
     """
