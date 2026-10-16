@@ -796,7 +796,7 @@ def payment_success(amount: float = 0.0):
     t.src=v;s=b.getElementsByTagName(e)[0];
     s.parentNode.insertBefore(t,s)}(window, document,'script',
     'https://connect.facebook.net/en_US/fbevents.js');
-    fbq('init', '1898222571587194');
+    fbq('init', '2030182497660583');
     fbq('track', 'Purchase', {currency: 'AZN', value: """ + purchase_value + """});
     </script>
     </body></html>
