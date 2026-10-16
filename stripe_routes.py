@@ -48,7 +48,6 @@ def create_checkout(
         raise HTTPException(status_code=400, detail=str(e))
 
     session = stripe.checkout.Session.create(
-        payment_method_types=["card"],
         line_items=[{
             "price_data": {
                 "currency": "azn",
